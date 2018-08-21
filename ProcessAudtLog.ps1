@@ -1,3 +1,5 @@
+#this gets the audit logs, per domain, for the time specified, and processes them. It stores any processed logs to Azure Table.
+
 param (
     [object]
     $WebhookData
