@@ -1,0 +1,52 @@
+{
+    "_comment": "This is the json for the part of flow that accepts the webhook from ProcessAuditLog",
+    "type": "object",
+    "properties": {
+        "ForwardingExternally": {
+            "type": "string"
+        },
+        "Organization": {
+            "type": "string"
+        },
+        "Threat": {
+            "type": "string"
+        },
+        "Type": {
+            "type": "string"
+        },
+        "LogID": {
+            "type": "string"
+        },
+        "Delete": {
+            "type": "string"
+        },
+        "RuleId": {
+            "type": "string"
+        },
+        "AppliesAllMail": {
+            "type": "string"
+        },
+        "Description": {
+            "type": "string"
+        },
+        "SetMailboxForwardingStatus": {
+            "type": "string"
+        },
+        "ForwardingAddress": {
+            "type": "string"
+        },
+        "SourceMailbox": {
+            "type": "string"
+        },
+        "ManagementDomain": {
+            "type": "string"
+        }
+    }
+}
+
+{
+  "_comment": "This is the json for the part of flow that sends the request to RemediateAccount runbook",
+  "Domain": "@{triggerBody()?['ManagementDomain']}",
+  "User": "@{triggerBody()?['SourceMailbox']}",
+  "ID": "@{triggerBody()?['LogID']}"
+}
