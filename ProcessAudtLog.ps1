@@ -1,26 +1,31 @@
-#this gets the audit logs, per domain, for the time specified, and processes them. It stores any processed logs to Azure Table.
-
 param (
     [object]
     $WebhookData
 )
-    $requestBody = ConvertFrom-Json $WebhookData.RequestBody
-    Write-Output "Request received via webhook '$($WebhookData.WebhookName)' by '$($WebhookData.RequestHeader.From)' at $($WebhookData.RequestHeader.Date)"
-    $Domain = $requestBody | Select-Object -ExpandProperty Domain 
-    $IDtoignore = $requestBody | Select-Object -ExpandProperty IDtoignore
-    $requestBody
-    Write-Output "$Domain - Checking Unfied Audit Log"
-    Write-Output "$IDtoignore are the IDs we will be ignoring."
-    $IDtoignore = $IDtoignore.split(" ")
-    Write-Output "There are $($IDtoignore.Count) IDs to ignore."
 
 #Variables 
-$MinutesToGoBack = '420'
-$FlowURI = 'Webhook to Flow'
+$MinutesToGoBack = '180' #this is where you configure how far back into the admin log each
+$FlowURI = 'webhook to flow'
 $RemoteCredential = Get-AutomationPSCredential -name 'delegatedadmin'
 $ResourceGroup = 'TestO365AuditLogMonitor'
 $StorageAccountName = 'TestO365AuditLogMonitor'
 $TableName = 'ProcessedAuditLogs'
+$IPStackAPIKey = '30941f251a75542750e2274175f6adf2'
+
+$requestBody = ConvertFrom-Json $WebhookData.RequestBody
+Write-Output "Request received via webhook '$($WebhookData.WebhookName)' by '$($WebhookData.RequestHeader.From)' at $($WebhookData.RequestHeader.Date)"
+
+$Domain = $requestBody | Select-Object -ExpandProperty Domain
+Write-Output "$Domain - Checking Unfied Audit Log" 
+
+$IDtoignore = $requestBody | Select-Object -ExpandProperty IDtoignore
+if ($IDtoignore) {
+    Write-Output "$IDtoignore are the IDs we will be ignoring."
+    $IDtoignore = $IDtoignore.split(" ")
+    Write-Output "There are $($IDtoignore.Count) IDs to ignore."
+} else {
+    Write-Output "There are no IDs to ignore"
+}
 
 #Variables for storage  
 $Conn = Get-AutomationConnection -Name AzureRunAsConnection
@@ -154,25 +159,67 @@ function Send-ToFlow {
     Invoke-RestMethod -Method Post -Uri $uri -Body $body -ContentType application/json
 }
 
+function Get-LocationFromIP {
+    [cmdletbinding()]
+    Param (
+    [parameter(ValueFromPipeline)]
+    $IPAddress
+    )
+
+    switch ($IPAddress.Split(":").count) {
+        1 {$IPAddress = $IPAddress}
+        2 {$IPAddress = $IPAddress.Split(":")[0]}
+        {$_ -gt 2} {$IPAddress = $IPAddress}
+        Default {
+            $Location = "Unable to determine the location, issues with determining IP address type"
+            Return $Location
+        }
+    }
+    
+    $Result = Invoke-WebRequest -Uri "http://api.ipstack.com/$IPAddress`?access_key=$IPStackAPIKey" -UseBasicParsing
+    if ($Result.StatusCode -ne '200') {
+        $Location = "Unable to determine the location, bad status code"
+        Return $Location   
+    }
+
+    $ResultContent = $Result.Content | ConvertFrom-json
+    if ($ResultContent.type) {
+        $Location = "$($ResultContent.city), $($ResultContent.region_name), $($ResultContent.country_name)"
+        Return $Location
+    } else {
+        $Location = "Unable to determine the location, bad content"
+        Return $Location
+    }
+
+}
+
 #Main
-$RemoteSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri ('https://ps.outlook.com/powershell-liveid?DelegatedOrg=' + $domain) -Credential $RemoteCredential -Authentication Basic -AllowRedirection 
+$RemoteSession = New-PSSession -ConfigurationName Microsoft.Exchange `
+                               -ConnectionUri ('https://ps.outlook.com/powershell-liveid?DelegatedOrg=' + $domain) `
+                               -Credential $RemoteCredential `
+                               -Authentication Basic `
+                               -AllowRedirection 
+
 Import-Module (Import-PSSession $RemoteSession -AllowClobber -DisableNameChecking) -Global -DisableNameChecking
 
-$LogsForAnalysis = Search-UnifiedAuditLog -StartDate ((Get-Date).AddMinutes(-$MinutesToGoBack)) -EndDate (Get-Date) -Operations New-InboxRule,Set-InboxRule,Set-Mailbox | #in testing those 3 operations were found to be involved with rules or forwarding setup
-Select-Object -ExpandProperty AuditData | Convertfrom-json | Where-Object {$_.UserId -ne 'NT AUTHORITY\SYSTEM (Microsoft.Exchange.ServiceHost)'} #we do not mind system actions 
+#in testing, the listed 3 operations were found to be potentially indicative of malitious rules or forwarding setup 
+$LogsForAnalysis = Search-UnifiedAuditLog -StartDate ((Get-Date).AddMinutes(-$MinutesToGoBack)) -EndDate (Get-Date) -Operations New-InboxRule,Set-InboxRule,Set-Mailbox |
+Select-Object -ExpandProperty AuditData | Convertfrom-json | Where-Object {$_.UserId -ne 'NT AUTHORITY\SYSTEM (Microsoft.Exchange.ServiceHost)'} 
 
-if ($null -eq $LogsForAnalysis) {
+if ($LogsForAnalysis) {
+    $LogCount = $LogsForAnalysis.count
+    Write-Output "$LogCount Logs to parce, continuing execution."
+} else {
     Write-Output "No matching logs to read, exiting runbook."
     exit
-    } else {
-        $LogCount = $LogsForAnalysis.count
-        Write-Output "$LogCount Logs to parce, continuing execution."
-    }
+}
 
 #determine needful processing depending on operation type 
 foreach ($Log in $LogsForAnalysis) {
 
     if ($IDtoignore -notcontains $($Log.ID)) {
+
+        $Location = $Log.ClientIP | Get-LocationFromIP
 
         switch ($log.Operation) {
             'New-InboxRule' {Write-Output "$($Log.ID) is the log entry's ID. It is a new inbox rule."
@@ -183,6 +230,8 @@ foreach ($Log in $LogsForAnalysis) {
                             $ThreatTable.Add("LogID","$($Log.ID)")
                             $ThreatTable.Add("InternalTimeStamp","$($(Get-Date).tofiletimeutc())")
                             $ThreatTable.Add("ManagementDomain","$domain")
+                            $ThreatTable.Add("IP","$($Log.ClientIP)")
+                            $ThreatTable.Add("Location","$($Location)")
 
                             Add-StorageTableRow -table $table -partitionKey $domain -rowKey $($Log.ID) -property $ThreatTable
 
@@ -198,6 +247,8 @@ foreach ($Log in $LogsForAnalysis) {
                             $ThreatTable.Add("LogID","$($Log.ID)")
                             $ThreatTable.Add("InternalTimeStamp","$($(Get-Date).tofiletimeutc())")
                             $ThreatTable.Add("ManagementDomain","$domain")
+                            $ThreatTable.Add("IP","$($Log.ClientIP)")
+                            $ThreatTable.Add("Location","$($Location)")
 
                             Add-StorageTableRow -table $table -partitionKey $domain -rowKey $($Log.ID) -property $ThreatTable
 
@@ -213,6 +264,8 @@ foreach ($Log in $LogsForAnalysis) {
                             $ThreatTable.Add("LogID","$($Log.ID)")
                             $ThreatTable.Add("InternalTimeStamp","$($(Get-Date).tofiletimeutc())")
                             $ThreatTable.Add("ManagementDomain","$domain")
+                            $ThreatTable.Add("IP","$($Log.ClientIP)")
+                            $ThreatTable.Add("Location","$($Location)")
                             
                             Add-StorageTableRow -table $table -partitionKey $domain -rowKey $($Log.ID) -property $ThreatTable
 
