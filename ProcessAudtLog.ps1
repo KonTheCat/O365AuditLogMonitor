@@ -10,7 +10,7 @@ $RemoteCredential = Get-AutomationPSCredential -name 'delegatedadmin'
 $ResourceGroup = 'TestO365AuditLogMonitor'
 $StorageAccountName = 'TestO365AuditLogMonitor'
 $TableName = 'ProcessedAuditLogs'
-$IPStackAPIKey = '30941f251a75542750e2274175f6adf2'
+$IPStackAPIKey = 'your webhook'
 
 $requestBody = ConvertFrom-Json $WebhookData.RequestBody
 Write-Output "Request received via webhook '$($WebhookData.WebhookName)' by '$($WebhookData.RequestHeader.From)' at $($WebhookData.RequestHeader.Date)"
