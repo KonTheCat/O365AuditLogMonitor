@@ -1,5 +1,5 @@
+#this is the Request Body JSON Schema for the start of the Flow
 {
-    "_comment": "This is the json for the part of flow that accepts the webhook from ProcessAuditLog",
     "type": "object",
     "properties": {
         "ForwardingExternally": {
@@ -38,14 +38,21 @@
         "SourceMailbox": {
             "type": "string"
         },
+        "Location": {
+            "type": "string"
+        },
+        "IP": {
+            "type": "string"
+        },
         "ManagementDomain": {
             "type": "string"
         }
     }
 }
 
+
+#This is the JSON for the Webhook of RemediateAccount
 {
-  "_comment": "This is the json for the part of flow that sends the request to RemediateAccount runbook",
   "Domain": "@{triggerBody()?['ManagementDomain']}",
   "User": "@{triggerBody()?['SourceMailbox']}",
   "ID": "@{triggerBody()?['LogID']}"
