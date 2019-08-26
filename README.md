@@ -3,4 +3,4 @@ Monitoring the O365 Unified Audit log for potentially malicious activity. Alerti
 
 Explanation and setup steps: 
 
-https://konthecat.com/2018/08/26/monitoring-the-office-365-audit-log-for-msps/
+https://blog.konthecat.com/monitoring-the-office-365-audit-log-for-msps/
